@@ -1,20 +1,44 @@
-// Ethereum Mainnet
+// Multi-Chain Token Revoker
 
 import { useState } from "react";
 import * as ethers from "ethers";
 
-/* -------------------- */
-/* CONFIG               */
-/* -------------------- */
-
 const API_KEY = import.meta.env.VITE_COVALENT_KEY;
-const CHAIN_NAME = "eth-mainnet";
+
+const CHAINS = {
+  ethereum: { name: "Ethereum", covalentName: "eth-mainnet", chainId: "0x1" },
+  base: { name: "Base", covalentName: "base-mainnet", chainId: "0x2105" },
+  bsc: {
+    name: "BSC",
+    covalentName: "bsc-mainnet",
+    chainId: "0x38",
+    rpc: "https://bsc-dataseed.binance.org/",
+    symbol: "BNB",
+  },
+  arbitrum: {
+    name: "Arbitrum",
+    covalentName: "arbitrum-mainnet",
+    chainId: "0xa4b1",
+  },
+  optimism: {
+    name: "Optimism",
+    covalentName: "optimism-mainnet",
+    chainId: "0xa",
+  },
+  polygon: {
+    name: "Polygon",
+    covalentName: "matic-mainnet",
+    chainId: "0x89",
+    symbol: "MATIC",
+  },
+};
 
 const ERC20_ABI = [
   "function approve(address spender, uint256 amount) returns (bool)",
 ];
 
 export default function App() {
+  const [selectedChain, setSelectedChain] = useState("ethereum");
   const [connectedAddress, setConnectedAddress] = useState(null);
   const [scanAddress, setScanAddress] = useState("");
   const [approvals, setApprovals] = useState([]);
@@ -22,14 +46,37 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
-  const [filter, setFilter] = useState("all");
   const [error, setError] = useState("");
-  const [hasManuallyScanned, setHasManuallyScanned] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
 
-  /* -------------------- */
-  /* CONNECT WALLET       */
-  /* -------------------- */
+  async function switchNetwork() {
+    const chain = CHAINS[selectedChain];
+
+    try {
+      await window.ethereum.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: chain.chainId }],
+      });
+    } catch (switchError) {
+      if (switchError.code === 4902 && chain.rpc) {
+        await window.ethereum.request({
+          method: "wallet_addEthereumChain",
+          params: [
+            {
+              chainId: chain.chainId,
+              chainName: chain.name,
+              rpcUrls: [chain.rpc],
+              nativeCurrency: {
+                name: chain.name,
+                symbol: chain.symbol || "ETH",
+                decimals: 18,
+              },
+            },
+          ],
+        });
+      }
+    }
+  }
 
   async function connectWallet() {
     if (!window.ethereum) {
@@ -37,148 +84,127 @@ export default function App() {
       return;
     }
 
+    await switchNetwork();
+
     const provider = new ethers.BrowserProvider(window.ethereum);
     const accounts = await provider.send("eth_requestAccounts", []);
     const normalized = ethers.getAddress(accounts[0]);
 
     setConnectedAddress(normalized);
-
-    if (!hasManuallyScanned) {
-      setScanAddress(normalized);
-      await fetchApprovalsForAddress(normalized);
-    }
+    setScanAddress(normalized);
+    await fetchApprovalsForAddress(normalized);
   }
 
-  /* -------------------- */
-  /* MANUAL FETCH         */
-  /* -------------------- */
+async function fetchApprovalsForAddress(address) {
+  try {
+    if (!API_KEY) throw new Error("Missing API Key");
 
-  async function fetchApprovals() {
-    try {
-      const normalized = ethers.getAddress(scanAddress.trim());
-      setHasManuallyScanned(true);
-      await fetchApprovalsForAddress(normalized);
-    } catch {
-      setError("Invalid wallet address");
+    setLoading(true);
+    setError("");
+    setApprovals([]);
+    setSelected({});
+    setHasScanned(false); // IMPORTANT
+
+    const chain = CHAINS[selectedChain];
+
+    const response = await fetch(
+      `https://api.covalenthq.com/v1/${chain.covalentName}/approvals/${address}/`,
+      { headers: { Authorization: `Bearer ${API_KEY}` } }
+    );
+
+    if (!response.ok) {
+      throw new Error("Invalid wallet or API error");
     }
-  }
 
-  /* -------------------- */
-  /* CORE FETCH FUNCTION  */
-  /* -------------------- */
+    const json = await response.json();
 
-  async function fetchApprovalsForAddress(address) {
-    try {
-      if (!API_KEY) throw new Error("Missing API Key");
-
-      setLoading(true);
-      setError("");
-      setApprovals([]);
-      setSelected({});
-      setHasScanned(true);
-
-      const response = await fetch(
-        `https://api.covalenthq.com/v1/${CHAIN_NAME}/approvals/${address}/`,
-        {
-          headers: {
-            Authorization: `Bearer ${API_KEY}`,
-          },
-        }
-      );
-
-      if (!response.ok) {
-        throw new Error(`API Error: ${response.status}`);
-      }
-
-      const json = await response.json();
-      if (json.error) {
-        throw new Error(json.error_message || "API error");
-      }
-
-      const flattened = [];
-
-      for (const token of json.data.items) {
-        for (const spender of token.spenders) {
-          flattened.push({
-            tokenAddress: token.token_address,
-            tokenLogo: token.logo_url,
-            name: token.token_address_label || token.ticker_symbol,
-            symbol: token.ticker_symbol,
-            spender: spender.spender_address,
-            spenderLabel: spender.spender_address_label,
-            allowance: spender.allowance,
-            isUnlimited: spender.allowance === "UNLIMITED",
-            daysOld: spender.block_signed_at
-              ? Math.floor(
-                  (Date.now() -
-                    new Date(spender.block_signed_at).getTime()) /
-                    (1000 * 60 * 60 * 24)
-                )
-              : 0,
-            risk: normalizeRisk(spender.risk_factor),
-            valueAtRisk:
-              spender.value_at_risk_quote != null
-                ? Number(spender.value_at_risk_quote)
-                : 0,
-          });
-        }
-      }
-
-      flattened.sort((a, b) => riskRank(b.risk) - riskRank(a.risk));
-      setApprovals(flattened);
-    } catch (err) {
-      console.error(err);
-      setError(err.message || "Failed to fetch approvals");
-    } finally {
-      setLoading(false);
+    // 🔥 CRITICAL FIX
+    if (!json.data || !Array.isArray(json.data.items)) {
+      throw new Error("Invalid or empty wallet address");
     }
+
+    const flattened = [];
+
+    for (const token of json.data.items) {
+      for (const spender of token.spenders) {
+        flattened.push({
+          tokenAddress: token.token_address,
+          tokenLogo: token.logo_url,
+          name: token.token_address_label || token.ticker_symbol,
+          symbol: token.ticker_symbol,
+          spender: spender.spender_address,
+          spenderLabel: spender.spender_address_label,
+          allowance: spender.allowance,
+          isUnlimited: spender.allowance === "UNLIMITED",
+          valueAtRisk: spender.value_at_risk_quote
+            ? Number(spender.value_at_risk_quote)
+            : 0,
+          daysOld: spender.block_signed_at
+            ? Math.floor(
+                (Date.now() -
+                  new Date(spender.block_signed_at).getTime()) /
+                  (1000 * 60 * 60 * 24)
+              )
+            : 0,
+          risk: normalizeRisk(spender.risk_factor),
+        });
+      }
+    }
+
+    // Only now mark as successfully scanned
+    setHasScanned(true);
+    setApprovals(flattened);
+
+  } catch (err) {
+    console.error(err);
+    setError(err.message || "Failed to fetch approvals");
+    setHasScanned(false); // 🔥 prevents empty-state message
+  } finally {
+    setLoading(false);
   }
+}
 
   function normalizeRisk(riskFactor) {
     if (!riskFactor) return "Low";
     if (riskFactor.includes("REVOKING")) return "High";
     if (riskFactor.includes("MEDIUM")) return "Medium";
-    if (riskFactor.includes("LOW")) return "Low";
     return "Low";
   }
 
-  function riskRank(level) {
-    return level === "High" ? 2 : level === "Medium" ? 1 : 0;
+  function riskColor(risk) {
+    if (risk === "High") return "red";
+    if (risk === "Medium") return "orange";
+    return "green";
   }
 
-  /* -------------------- */
-  /* BATCH REVOKE         */
-  /* -------------------- */
-
   async function batchRevoke() {
-    try {
-      const normalizedScan = ethers.getAddress(scanAddress);
+  try {
+    if (connectedAddress?.toLowerCase() !== scanAddress?.toLowerCase()) {
+      alert("Connect the wallet you're scanning to revoke.");
+      return;
+    }
 
-      if (
-        connectedAddress?.toLowerCase() !==
-        normalizedScan.toLowerCase()
-      ) {
-        alert("Connect the wallet you're scanning to revoke.");
-        return;
-      }
+    await switchNetwork();
 
-      const targets = approvals.filter(
-        (a) => selected[`${a.tokenAddress}-${a.spender}`]
-      );
+    const targets = approvals.filter(
+      (a) => selected[`${a.tokenAddress}-${a.spender}`]
+    );
 
-      if (!targets.length) {
-        alert("No approvals selected");
-        return;
-      }
+    if (!targets.length) {
+      alert("No approvals selected");
+      return;
+    }
 
-      setRevoking(true);
-      setProgress({ current: 0, total: targets.length });
+    setRevoking(true);
+    setProgress({ current: 0, total: targets.length });
 
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const signer = await provider.getSigner();
+    const provider = new ethers.BrowserProvider(window.ethereum);
+    const signer = await provider.getSigner();
 
-      for (let i = 0; i < targets.length; i++) {
-        const a = targets[i];
+    for (let i = 0; i < targets.length; i++) {
+      const a = targets[i];
+
+      try {
         setProgress({ current: i + 1, total: targets.length });
 
         const token = new ethers.Contract(
@@ -190,6 +216,7 @@ export default function App() {
         const tx = await token.approve(a.spender, 0);
         await tx.wait();
 
+        // Remove successfully revoked item
         setApprovals((prev) =>
           prev.filter(
             (x) =>
@@ -199,81 +226,112 @@ export default function App() {
               )
           )
         );
+
+      } catch (txError) {
+        console.error("Transaction failed or cancelled:", txError);
+
+        alert("Transaction cancelled. Revoking stopped.");
+
+        break; // 🔥 STOP ENTIRE LOOP
       }
-
-      setSelected({});
-      alert("Batch revoke completed");
-    } catch (err) {
-      console.error(err);
-      alert("Batch revoke cancelled or failed");
-    } finally {
-      setRevoking(false);
-      setProgress({ current: 0, total: 0 });
     }
+
+    setSelected({});
+  } catch (err) {
+    console.error(err);
+    alert("Batch revoke failed.");
+  } finally {
+    setRevoking(false);
+    setProgress({ current: 0, total: 0 });
   }
-
-  /* -------------------- */
-  /* FILTERED DATA        */
-  /* -------------------- */
-
-  const filtered =
-    filter === "all"
-      ? approvals
-      : approvals.filter((a) => a.risk.toLowerCase() === filter);
-
-  /* -------------------- */
-  /* UI                   */
-  /* -------------------- */
+}
 
   return (
     <div
       style={{
-        padding: 16,
-        fontFamily: "sans-serif",
+        padding: 20,
         maxWidth: 480,
         margin: "0 auto",
+        fontFamily: "sans-serif",
         width: "100%",
         boxSizing: "border-box",
       }}
     >
-      <h2 style={{ textAlign: "center" }}>
-        Ethereum Token Revoker 🔐
+      <h2
+        style={{
+          textAlign: "center",
+          marginBottom: 20,
+          fontWeight: "bold",
+          fontSize: 22,
+        }}
+      >
+        Multi-chain Token Revoker 🔐
       </h2>
 
-      <input
-        placeholder="Enter wallet address"
-        value={scanAddress}
-        onChange={(e) => setScanAddress(e.target.value)}
+      <select
+        value={selectedChain}
+        onChange={(e) => setSelectedChain(e.target.value)}
         style={{
           width: "100%",
-          padding: 10,
+          marginBottom: 12,
+          padding: 12,
+          borderRadius: 10,
           boxSizing: "border-box",
+        }}
+      >
+        {Object.keys(CHAINS).map((key) => (
+          <option key={key} value={key}>
+            {CHAINS[key].name}
+          </option>
+        ))}
+      </select>
+
+      {/* MOBILE PERFECT INPUT */}
+      <input
+        value={scanAddress}
+        onChange={(e) => setScanAddress(e.target.value)}
+        placeholder="Enter wallet address"
+        style={{
+          width: "100%",
+          padding: "14px 16px",
+          borderRadius: 12,
+          border: "1px solid #ddd",
+          fontSize: 16,
+          boxSizing: "border-box",
+          outline: "none",
         }}
       />
 
       <button
-        onClick={fetchApprovals}
-        style={{ marginTop: 8, width: "100%" }}
+        onClick={() => fetchApprovalsForAddress(scanAddress)}
+        style={{
+          width: "100%",
+          marginTop: 12,
+          padding: 14,
+          borderRadius: 12,
+          fontSize: 16,
+          boxSizing: "border-box",
+        }}
       >
         Scan Wallet
       </button>
 
-      <hr />
+      <hr style={{ margin: "24px 0" }} />
 
       {!connectedAddress ? (
         <button
           onClick={connectWallet}
-          style={{ width: "100%" }}
+          style={{
+            width: "100%",
+            padding: 14,
+            borderRadius: 12,
+            boxSizing: "border-box",
+          }}
         >
           Connect Wallet
         </button>
       ) : (
-        <p
-          style={{
-            wordBreak: "break-all",
-            fontSize: 14,
-          }}
-        >
+        <p style={{ wordBreak: "break-all" }}>
           Connected: {connectedAddress}
         </p>
       )}
@@ -281,36 +339,20 @@ export default function App() {
       {loading && <p>Fetching approvals...</p>}
       {error && <p style={{ color: "red" }}>{error}</p>}
 
-      {!loading &&
-        !error &&
-        hasScanned &&
-        approvals.length === 0 && (
-          <div
-            style={{
-              marginTop: 20,
-              padding: 16,
-              borderRadius: 8,
-              background: "#f4f4f4",
-              textAlign: "center",
-            }}
-          >
-            <strong>No token approvals found 🎉</strong>
-            <p style={{ fontSize: 14 }}>
-            This wallet has no active ERC-20 approvals.
-            </p>
-          </div>
-        )}
-
-      <select
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-        style={{ width: "100%", marginTop: 10 }}
-      >
-        <option value="all">All</option>
-        <option value="low">Low</option>
-        <option value="medium">Medium</option>
-        <option value="high">High</option>
-      </select>
+      {!loading && hasScanned && approvals.length === 0 && (
+        <div
+          style={{
+            marginTop: 20,
+            padding: 20,
+            borderRadius: 14,
+            background: "#f4f4f4",
+            textAlign: "center",
+          }}
+        >
+          <h3>No token approvals found 🎉</h3>
+          <p>This wallet has no active ERC-20 approvals.</p>
+        </div>
+      )}
 
       {connectedAddress?.toLowerCase() ===
         scanAddress?.toLowerCase() &&
@@ -319,13 +361,16 @@ export default function App() {
             onClick={batchRevoke}
             disabled={revoking}
             style={{
-              background: "crimson",
+              background: "#e50914",
               color: "white",
-              marginTop: 12,
-              padding: 12,
+              marginTop: 20,
+              padding: 16,
               width: "100%",
-              borderRadius: 8,
+              borderRadius: 14,
               border: "none",
+              fontWeight: "bold",
+              fontSize: 16,
+              boxSizing: "border-box",
             }}
           >
             {revoking
@@ -334,56 +379,53 @@ export default function App() {
           </button>
         )}
 
-      {filtered.map((a) => {
+      {approvals.map((a) => {
         const key = `${a.tokenAddress}-${a.spender}`;
 
         return (
           <div
             key={key}
             style={{
-              border: "1px solid #ccc",
-              padding: 14,
-              marginTop: 14,
-              borderRadius: 10,
+              border: "1px solid #ddd",
+              padding: 18,
+              marginTop: 18,
+              borderRadius: 18,
+              background: "#fafafa",
               boxSizing: "border-box",
             }}
           >
-            {connectedAddress?.toLowerCase() ===
-              scanAddress?.toLowerCase() && (
-              <input
-                type="checkbox"
-                checked={!!selected[key]}
-                onChange={() =>
-                  setSelected((s) => ({
-                    ...s,
-                    [key]: !s[key],
-                  }))
-                }
-                style={{ marginBottom: 8 }}
-              />
-            )}
+            <input
+              type="checkbox"
+              checked={!!selected[key]}
+              onChange={() =>
+                setSelected((s) => ({
+                  ...s,
+                  [key]: !s[key],
+                }))
+              }
+              style={{ marginBottom: 12 }}
+            />
 
-            <div style={{ display: "flex", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               {a.tokenLogo && (
                 <img
                   src={a.tokenLogo}
                   alt=""
-                  width="24"
-                  style={{ marginRight: 8 }}
+                  width="40"
+                  style={{ borderRadius: "50%" }}
                 />
               )}
-              <strong>
+              <strong style={{ fontSize: 18 }}>
                 {a.name} ({a.symbol})
               </strong>
             </div>
 
-            <p style={{ wordBreak: "break-all" }}>
+            <p style={{ marginTop: 12, wordBreak: "break-all" }}>
               Spender: {a.spenderLabel || a.spender}
             </p>
 
-            <p style={{ wordBreak: "break-all" }}>
-              Allowance:{" "}
-              {a.isUnlimited ? "Unlimited 🚨" : a.allowance}
+            <p>
+              Allowance: {a.isUnlimited ? "Unlimited 🚨" : a.allowance}
             </p>
 
             <p>Value at Risk: ${a.valueAtRisk.toFixed(2)}</p>
@@ -391,16 +433,7 @@ export default function App() {
 
             <p>
               Risk:{" "}
-              <span
-                style={{
-                  color:
-                    a.risk === "High"
-                      ? "red"
-                      : a.risk === "Medium"
-                      ? "orange"
-                      : "green",
-                }}
-              >
+              <span style={{ color: riskColor(a.risk), fontWeight: "bold" }}>
                 {a.risk}
               </span>
             </p>

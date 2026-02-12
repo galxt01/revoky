@@ -1,158 +1,91 @@
-# 🔐 Ethereum Token Revoker
+# Multi-Chain Token Revoker 🔐
 
-A mobile-friendly Ethereum Mainnet token approval scanner powered by Covalent API with batch revoke functionality.
+A lightweight, mobile-friendly Web3 application that allows users to scan and revoke ERC-20 token approvals across multiple EVM chains.
 
-This tool allows users to:
+This tool helps users reduce wallet risk by identifying unlimited token approvals and revoking them in batch.
 
-- 🔍 Scan any Ethereum wallet for active ERC-20 approvals  
-- ⚠️ Detect risky / unlimited approvals  
-- 💰 View value at risk (USD)  
-- 🧠 Filter by risk level  
-- 🔗 Connect wallet  
-- ❌ Batch revoke selected approvals  
-- 📱 Use seamlessly on mobile  
+---
+
+## 🌐 Supported Networks
+
+- Ethereum Mainnet  
+- Base  
+- Binance Smart Chain (BSC)  
+- Arbitrum  
+- Optimism  
+- Polygon  
+
+Powered by the Covalent API for approvals indexing.
 
 ---
 
 ## 🚀 Features
 
-### ✅ Ethereum Mainnet Support
-Uses Covalent’s `eth-mainnet` approval endpoint.
-
-### ✅ Scan Any Address
-No wallet connection required to scan.
-
-### ✅ Auto-Fetch on Wallet Connect
-If you connect your wallet without manually scanning, approvals are fetched automatically.
-
-### ✅ Risk Engine
-Approvals are categorized as:
-- 🟢 Low
-- 🟠 Medium
-- 🔴 High
-
-Based on Covalent’s `risk_factor`.
-
-### ✅ Value at Risk
-Displays estimated USD value at risk for each approval.
-
-### ✅ Unlimited Approval Detection
-Detects `"UNLIMITED"` approvals returned by Covalent.
-
-### ✅ Batch Revoke
-Users can:
-- Select multiple approvals
-- Revoke all in sequence
-- Track revoke progress live
-
-### ✅ Empty State Detection
-Displays a success message when no approvals are found.
-
-### ✅ Mobile Optimized
-- No horizontal overflow
-- Safe long address wrapping
-- Centered responsive layout
+- 🔎 Scan any wallet address for ERC-20 approvals  
+- 🔗 Multi-chain support  
+- 🔐 Batch revoke approvals  
+- 🚨 Detect unlimited allowances  
+- 💰 Show value at risk (USD)  
+- 📅 Show approval age  
+- 🎨 Risk indicator (Low / Medium / High)  
+- 📱 Fully mobile responsive  
+- 🛑 Stops revoking if transaction is cancelled  
 
 ---
 
-# 🛠 Tech Stack
+## 🛠 Tech Stack
 
 - React (Vite)
-- Ethers.js v6
+- ethers.js (v6)
 - Covalent API
-- Ethereum Mainnet
+- MetaMask / Injected Web3 Wallet
 
 ---
 
-# 📦 Installation
+## 📦 Installation & Setup
 
-Clone the repository:
+### 1️⃣ Clone the repository
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
-cd YOUR_REPO
+git clone https://github.com/yourusername/multi-chain-token-revoker.git
+cd multi-chain-token-revoker
 ```
 
-Install dependencies:
+### 2️⃣ Install dependencies
 
 ```bash
 npm install
 ```
 
----
+This installs all required packages including React, Vite, and ethers.js.
 
-# 🔑 Environment Setup
+### 3️⃣ Create environment file
 
 Create a `.env` file in the root directory:
 
-```
+```env
 VITE_COVALENT_KEY=your_covalent_api_key_here
 ```
 
-Important:
-- Must start with `VITE_`
-- Restart dev server after editing `.env`
+You can get your API key from:
 
----
+https://www.covalenthq.com/
 
-# ▶️ Run Development Server
+⚠️ Important:
+- The variable must start with `VITE_`
+- Restart the dev server after adding the key
+
+### 4️⃣ Run development server
 
 ```bash
 npm run dev
 ```
-
-Then open:
+The app will start at:
 
 ```
 http://localhost:5173
 ```
 
----
-
-# 🔗 Covalent API Used
-
-Endpoint:
-
-```
-GET /v1/eth-mainnet/approvals/{walletAddress}/
-```
-
-Documentation:
-https://goldrush.dev/docs/api-reference
+Open this URL in your browser.
 
 ---
-
-# ⚠️ Security Notes
-
-- API key is exposed client-side (for development/demo use only).
-- For production deployment, use a backend proxy to protect your API key.
-- Always verify transactions before confirming revokes in MetaMask.
-
----
-
-# 🔮 Future Improvements
-
-- 🔥 Revoke All High-Risk Button
-- 📊 Dashboard Summary (Total Value at Risk)
-- 🌍 Multi-chain selector (Arbitrum, Base, etc.)
-- ✂ Address truncation + Copy button
-- 🎨 Modern UI styling upgrade
-- 🔐 Backend API proxy for production security
-
----
-
-# 🧠 Why This Tool Matters
-
-Unlimited token approvals are one of the biggest attack vectors in DeFi.
-
-This tool helps users:
-- See hidden risks
-- Understand exposure
-- Revoke unnecessary permissions
-- Improve wallet security
-
----
-
-# 📜 License
-
-MIT License
