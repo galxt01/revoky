@@ -1,42 +1,30 @@
-// Ethereum Sepolia
+// Ethereum Mainnet
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import * as ethers from "ethers";
 
 /* -------------------- */
-/* CONSTANTS & ABI      */
+/* CONFIG               */
 /* -------------------- */
 
-const SEPOLIA_CHAIN_ID = "0xaa36a7";
+const API_KEY = import.meta.env.VITE_COVALENT_KEY;
+const CHAIN_NAME = "eth-mainnet";
 
 const ERC20_ABI = [
-  "event Approval(address indexed owner, address indexed spender, uint256 value)",
-  "function name() view returns (string)",
-  "function symbol() view returns (string)",
-  "function decimals() view returns (uint8)",
   "function approve(address spender, uint256 amount) returns (bool)",
 ];
-
-const MAX_UINT =
-  "115792089237316195423570985008687907853269984665640564039457584007913129639935";
-
-const KNOWN_SPENDERS = {
-  "0xE592427A0AEce92De3Edee1F18E0157C05861564": "Uniswap Router",
-};
 
 export default function App() {
   const [connectedAddress, setConnectedAddress] = useState(null);
   const [scanAddress, setScanAddress] = useState("");
-  const [activeAddress, setActiveAddress] = useState(null);
-  const [lastFetchedAddress, setLastFetchedAddress] = useState(null);
-
   const [approvals, setApprovals] = useState([]);
   const [selected, setSelected] = useState({});
   const [loading, setLoading] = useState(false);
   const [revoking, setRevoking] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
-  const [error, setError] = useState("");
   const [filter, setFilter] = useState("all");
+  const [error, setError] = useState("");
+  const [hasManuallyScanned, setHasManuallyScanned] = useState(false);
   const [hasScanned, setHasScanned] = useState(false);
 
   /* -------------------- */
@@ -50,134 +38,107 @@ export default function App() {
     }
 
     const provider = new ethers.BrowserProvider(window.ethereum);
-    const network = await provider.getNetwork();
-
-    if (network.chainId !== 11155111n) {
-      alert("Please switch to Sepolia network");
-      return;
-    }
-
     const accounts = await provider.send("eth_requestAccounts", []);
     const normalized = ethers.getAddress(accounts[0]);
 
     setConnectedAddress(normalized);
-    setScanAddress(normalized);
-    setActiveAddress(normalized);
 
-    if (normalized.toLowerCase() !== lastFetchedAddress?.toLowerCase()) {
-      resetState();
+    if (!hasManuallyScanned) {
+      setScanAddress(normalized);
+      await fetchApprovalsForAddress(normalized);
     }
   }
 
-  function scanInputAddress() {
-    try {
-      const checksummed = ethers.getAddress(scanAddress.trim());
-      setActiveAddress(checksummed);
+  /* -------------------- */
+  /* MANUAL FETCH         */
+  /* -------------------- */
 
-      if (checksummed.toLowerCase() !== lastFetchedAddress?.toLowerCase()) {
-        resetState();
-      }
+  async function fetchApprovals() {
+    try {
+      const normalized = ethers.getAddress(scanAddress.trim());
+      setHasManuallyScanned(true);
+      await fetchApprovalsForAddress(normalized);
     } catch {
-      alert("Invalid wallet address");
+      setError("Invalid wallet address");
     }
   }
 
-  function resetState() {
-    setApprovals([]);
-    setSelected({});
-    setError("");
-    setHasScanned(false);
-  }
+  /* -------------------- */
+  /* CORE FETCH FUNCTION  */
+  /* -------------------- */
 
-  useEffect(() => {
-    if (
-      activeAddress &&
-      activeAddress.toLowerCase() !== lastFetchedAddress?.toLowerCase()
-    ) {
-      fetchApprovals(activeAddress);
-    }
-    // eslint-disable-next-line
-  }, [activeAddress]);
-
-  async function fetchApprovals(addressToScan) {
+  async function fetchApprovalsForAddress(address) {
     try {
+      if (!API_KEY) throw new Error("Missing API Key");
+
       setLoading(true);
       setError("");
+      setApprovals([]);
+      setSelected({});
       setHasScanned(true);
 
-      const provider = new ethers.BrowserProvider(window.ethereum);
-      const approvalTopic = ethers.id("Approval(address,address,uint256)");
+      const response = await fetch(
+        `https://api.covalenthq.com/v1/${CHAIN_NAME}/approvals/${address}/`,
+        {
+          headers: {
+            Authorization: `Bearer ${API_KEY}`,
+          },
+        }
+      );
 
-      const logs = await provider.getLogs({
-        fromBlock: 0,
-        toBlock: "latest",
-        topics: [
-          approvalTopic,
-          ethers.zeroPadValue(addressToScan, 32),
-        ],
-      });
-
-      const iface = new ethers.Interface(ERC20_ABI);
-      const map = new Map();
-
-      for (const log of logs) {
-        const parsed = iface.parseLog(log);
-        map.set(`${log.address}-${parsed.args.spender}`, {
-          token: log.address,
-          spender: parsed.args.spender,
-          allowance: parsed.args.value.toString(),
-          blockNumber: log.blockNumber,
-        });
+      if (!response.ok) {
+        throw new Error(`API Error: ${response.status}`);
       }
 
-      const latestBlock = await provider.getBlockNumber();
-      const result = [];
-
-      for (const a of map.values()) {
-        const token = new ethers.Contract(a.token, ERC20_ABI, provider);
-
-        const name = await token.name().catch(() => "Unknown Token");
-        const symbol = await token.symbol().catch(() => "");
-        const decimals = await token.decimals().catch(() => 18);
-
-        const isUnlimited = a.allowance === MAX_UINT;
-        const formatted = isUnlimited
-          ? "Unlimited"
-          : ethers.formatUnits(a.allowance, decimals);
-
-        if (!isUnlimited && Number(formatted) === 0) continue;
-
-        const daysOld = Math.round((latestBlock - a.blockNumber) / 6500);
-        const risk = computeRisk(isUnlimited, a.spender, daysOld);
-
-        result.push({
-          ...a,
-          name,
-          symbol,
-          isUnlimited,
-          formatted,
-          daysOld,
-          risk,
-          knownSpender: KNOWN_SPENDERS[a.spender],
-        });
+      const json = await response.json();
+      if (json.error) {
+        throw new Error(json.error_message || "API error");
       }
 
-      result.sort((a, b) => riskRank(b.risk) - riskRank(a.risk));
+      const flattened = [];
 
-      setApprovals(result);
-      setLastFetchedAddress(addressToScan);
+      for (const token of json.data.items) {
+        for (const spender of token.spenders) {
+          flattened.push({
+            tokenAddress: token.token_address,
+            tokenLogo: token.logo_url,
+            name: token.token_address_label || token.ticker_symbol,
+            symbol: token.ticker_symbol,
+            spender: spender.spender_address,
+            spenderLabel: spender.spender_address_label,
+            allowance: spender.allowance,
+            isUnlimited: spender.allowance === "UNLIMITED",
+            daysOld: spender.block_signed_at
+              ? Math.floor(
+                  (Date.now() -
+                    new Date(spender.block_signed_at).getTime()) /
+                    (1000 * 60 * 60 * 24)
+                )
+              : 0,
+            risk: normalizeRisk(spender.risk_factor),
+            valueAtRisk:
+              spender.value_at_risk_quote != null
+                ? Number(spender.value_at_risk_quote)
+                : 0,
+          });
+        }
+      }
+
+      flattened.sort((a, b) => riskRank(b.risk) - riskRank(a.risk));
+      setApprovals(flattened);
     } catch (err) {
       console.error(err);
-      setError("Failed to fetch approvals");
+      setError(err.message || "Failed to fetch approvals");
     } finally {
       setLoading(false);
     }
   }
 
-  function computeRisk(isUnlimited, spender, daysOld) {
-    const known = KNOWN_SPENDERS[spender];
-    if (isUnlimited && !known) return "High";
-    if (daysOld > 180) return "Medium";
+  function normalizeRisk(riskFactor) {
+    if (!riskFactor) return "Low";
+    if (riskFactor.includes("REVOKING")) return "High";
+    if (riskFactor.includes("MEDIUM")) return "Medium";
+    if (riskFactor.includes("LOW")) return "Low";
     return "Low";
   }
 
@@ -185,25 +146,31 @@ export default function App() {
     return level === "High" ? 2 : level === "Medium" ? 1 : 0;
   }
 
+  /* -------------------- */
+  /* BATCH REVOKE         */
+  /* -------------------- */
+
   async function batchRevoke() {
-    if (
-      connectedAddress?.toLowerCase() !==
-      activeAddress?.toLowerCase()
-    ) {
-      alert("You can only revoke approvals for your own wallet");
-      return;
-    }
-
-    const targets = approvals.filter(
-      (a) => selected[`${a.token}-${a.spender}`]
-    );
-
-    if (!targets.length) {
-      alert("No approvals selected");
-      return;
-    }
-
     try {
+      const normalizedScan = ethers.getAddress(scanAddress);
+
+      if (
+        connectedAddress?.toLowerCase() !==
+        normalizedScan.toLowerCase()
+      ) {
+        alert("Connect the wallet you're scanning to revoke.");
+        return;
+      }
+
+      const targets = approvals.filter(
+        (a) => selected[`${a.tokenAddress}-${a.spender}`]
+      );
+
+      if (!targets.length) {
+        alert("No approvals selected");
+        return;
+      }
+
       setRevoking(true);
       setProgress({ current: 0, total: targets.length });
 
@@ -214,20 +181,30 @@ export default function App() {
         const a = targets[i];
         setProgress({ current: i + 1, total: targets.length });
 
-        const token = new ethers.Contract(a.token, ERC20_ABI, signer);
+        const token = new ethers.Contract(
+          a.tokenAddress,
+          ERC20_ABI,
+          signer
+        );
+
         const tx = await token.approve(a.spender, 0);
         await tx.wait();
 
         setApprovals((prev) =>
           prev.filter(
             (x) =>
-              !(x.token === a.token && x.spender === a.spender)
+              !(
+                x.tokenAddress === a.tokenAddress &&
+                x.spender === a.spender
+              )
           )
         );
       }
 
       setSelected({});
-    } catch {
+      alert("Batch revoke completed");
+    } catch (err) {
+      console.error(err);
       alert("Batch revoke cancelled or failed");
     } finally {
       setRevoking(false);
@@ -235,10 +212,18 @@ export default function App() {
     }
   }
 
+  /* -------------------- */
+  /* FILTERED DATA        */
+  /* -------------------- */
+
   const filtered =
     filter === "all"
       ? approvals
       : approvals.filter((a) => a.risk.toLowerCase() === filter);
+
+  /* -------------------- */
+  /* UI                   */
+  /* -------------------- */
 
   return (
     <div
@@ -252,21 +237,25 @@ export default function App() {
       }}
     >
       <h2 style={{ textAlign: "center" }}>
-        Sepolia Token Revoker 🔐
+        Ethereum Token Revoker 🔐
       </h2>
 
       <input
+        placeholder="Enter wallet address"
         value={scanAddress}
         onChange={(e) => setScanAddress(e.target.value)}
-        placeholder="Wallet address"
-        style={{ width: "100%", padding: 10 }}
+        style={{
+          width: "100%",
+          padding: 10,
+          boxSizing: "border-box",
+        }}
       />
 
       <button
-        onClick={scanInputAddress}
-        style={{ width: "100%", marginTop: 8 }}
+        onClick={fetchApprovals}
+        style={{ marginTop: 8, width: "100%" }}
       >
-        Scan Address
+        Scan Wallet
       </button>
 
       <hr />
@@ -279,33 +268,52 @@ export default function App() {
           Connect Wallet
         </button>
       ) : (
-        <p style={{ wordBreak: "break-all", fontSize: 14 }}>
+        <p
+          style={{
+            wordBreak: "break-all",
+            fontSize: 14,
+          }}
+        >
           Connected: {connectedAddress}
         </p>
       )}
 
-      {loading && <p>Scanning blockchain…</p>}
+      {loading && <p>Fetching approvals...</p>}
       {error && <p style={{ color: "red" }}>{error}</p>}
 
-      {!loading && hasScanned && approvals.length === 0 && (
-        <div
-          style={{
-            marginTop: 20,
-            padding: 16,
-            background: "#f4f4f4",
-            borderRadius: 8,
-            textAlign: "center",
-          }}
-        >
-          <strong>No approvals found 🎉</strong>
-          <p style={{ fontSize: 14 }}>
+      {!loading &&
+        !error &&
+        hasScanned &&
+        approvals.length === 0 && (
+          <div
+            style={{
+              marginTop: 20,
+              padding: 16,
+              borderRadius: 8,
+              background: "#f4f4f4",
+              textAlign: "center",
+            }}
+          >
+            <strong>No token approvals found 🎉</strong>
+            <p style={{ fontSize: 14 }}>
             This wallet has no active ERC-20 approvals.
-          </p>
-        </div>
-      )}
+            </p>
+          </div>
+        )}
+
+      <select
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+        style={{ width: "100%", marginTop: 10 }}
+      >
+        <option value="all">All</option>
+        <option value="low">Low</option>
+        <option value="medium">Medium</option>
+        <option value="high">High</option>
+      </select>
 
       {connectedAddress?.toLowerCase() ===
-        activeAddress?.toLowerCase() &&
+        scanAddress?.toLowerCase() &&
         approvals.length > 0 && (
           <button
             onClick={batchRevoke}
@@ -326,51 +334,79 @@ export default function App() {
           </button>
         )}
 
-      <div style={{ marginTop: 20 }}>
-        {filtered.map((a) => {
-          const key = `${a.token}-${a.spender}`;
+      {filtered.map((a) => {
+        const key = `${a.tokenAddress}-${a.spender}`;
 
-          return (
-            <div
-              key={key}
-              style={{
-                border: "1px solid #ccc",
-                padding: 14,
-                marginBottom: 14,
-                borderRadius: 10,
-              }}
-            >
-              {connectedAddress?.toLowerCase() ===
-                activeAddress?.toLowerCase() && (
-                <input
-                  type="checkbox"
-                  checked={!!selected[key]}
-                  onChange={() =>
-                    setSelected((s) => ({
-                      ...s,
-                      [key]: !s[key],
-                    }))
-                  }
-                  style={{ marginBottom: 8 }}
+        return (
+          <div
+            key={key}
+            style={{
+              border: "1px solid #ccc",
+              padding: 14,
+              marginTop: 14,
+              borderRadius: 10,
+              boxSizing: "border-box",
+            }}
+          >
+            {connectedAddress?.toLowerCase() ===
+              scanAddress?.toLowerCase() && (
+              <input
+                type="checkbox"
+                checked={!!selected[key]}
+                onChange={() =>
+                  setSelected((s) => ({
+                    ...s,
+                    [key]: !s[key],
+                  }))
+                }
+                style={{ marginBottom: 8 }}
+              />
+            )}
+
+            <div style={{ display: "flex", alignItems: "center" }}>
+              {a.tokenLogo && (
+                <img
+                  src={a.tokenLogo}
+                  alt=""
+                  width="24"
+                  style={{ marginRight: 8 }}
                 />
               )}
-
               <strong>
-                {a.name} {a.symbol && `(${a.symbol})`}
+                {a.name} ({a.symbol})
               </strong>
-
-              <p style={{ wordBreak: "break-all" }}>
-                Spender: {a.spender}
-              </p>
-
-              <p style={{ wordBreak: "break-all" }}>
-                Allowance:{" "}
-                {a.isUnlimited ? "Unlimited 🚨" : a.formatted}
-              </p>
             </div>
-          );
-        })}
-      </div>
+
+            <p style={{ wordBreak: "break-all" }}>
+              Spender: {a.spenderLabel || a.spender}
+            </p>
+
+            <p style={{ wordBreak: "break-all" }}>
+              Allowance:{" "}
+              {a.isUnlimited ? "Unlimited 🚨" : a.allowance}
+            </p>
+
+            <p>Value at Risk: ${a.valueAtRisk.toFixed(2)}</p>
+            <p>Age: {a.daysOld} days</p>
+
+            <p>
+              Risk:{" "}
+              <span
+                style={{
+                  color:
+                    a.risk === "High"
+                      ? "red"
+                      : a.risk === "Medium"
+                      ? "orange"
+                      : "green",
+                }}
+              >
+                {a.risk}
+              </span>
+            </p>
+          </div>
+        );
+      })}
     </div>
   );
 }

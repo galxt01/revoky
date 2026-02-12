@@ -1,73 +1,158 @@
-# 🛡 Sepolia Token Revoker
+# 🔐 Ethereum Token Revoker
 
-A lightweight Web3 security tool that allows users to:
+A mobile-friendly Ethereum Mainnet token approval scanner powered by Covalent API with batch revoke functionality.
 
-- 🔍 Scan ERC-20 token approvals
-- ⚠ Detect unlimited approvals
-- 📊 View risk analysis
-- 🔐 Batch revoke token approvals
-- 🌐 Scan any wallet address
-- 🧪 Test safely on Ethereum Sepolia
+This tool allows users to:
 
-Built using:
-- React (Vite)
-- Ethers.js v6
+- 🔍 Scan any Ethereum wallet for active ERC-20 approvals  
+- ⚠️ Detect risky / unlimited approvals  
+- 💰 View value at risk (USD)  
+- 🧠 Filter by risk level  
+- 🔗 Connect wallet  
+- ❌ Batch revoke selected approvals  
+- 📱 Use seamlessly on mobile  
 
 ---
 
 ## 🚀 Features
 
-### 🔎 Approval Scanner
-Fetches all ERC-20 approvals for a wallet using public API.
+### ✅ Ethereum Mainnet Support
+Uses Covalent’s `eth-mainnet` approval endpoint.
 
-### ⚠ Risk Engine
-Highlights:
-- Unlimited approvals
-- High value-at-risk approvals
-- Risk levels (Low / Medium / High)
+### ✅ Scan Any Address
+No wallet connection required to scan.
 
-### 🔐 Batch Revoke
-If the connected wallet matches the scanned address:
+### ✅ Auto-Fetch on Wallet Connect
+If you connect your wallet without manually scanning, approvals are fetched automatically.
+
+### ✅ Risk Engine
+Approvals are categorized as:
+- 🟢 Low
+- 🟠 Medium
+- 🔴 High
+
+Based on Covalent’s `risk_factor`.
+
+### ✅ Value at Risk
+Displays estimated USD value at risk for each approval.
+
+### ✅ Unlimited Approval Detection
+Detects `"UNLIMITED"` approvals returned by Covalent.
+
+### ✅ Batch Revoke
+Users can:
 - Select multiple approvals
-- Revoke them in a single session
+- Revoke all in sequence
+- Track revoke progress live
 
-### 📱 Mobile Friendly
-Optimized layout for mobile devices with:
-- Proper address wrapping
+### ✅ Empty State Detection
+Displays a success message when no approvals are found.
+
+### ✅ Mobile Optimized
 - No horizontal overflow
-- Clean card layout
+- Safe long address wrapping
+- Centered responsive layout
 
 ---
 
-## 🌐 Network
+# 🛠 Tech Stack
 
-This version runs on:
-
-**Ethereum Sepolia Testnet**
-
-You must:
-- Connect MetaMask
-- Switch network to Sepolia
+- React (Vite)
+- Ethers.js v6
+- Covalent API
+- Ethereum Mainnet
 
 ---
 
-## 🧪 Demo Flow
-
-1. Enter a wallet address
-2. Click **Scan**
-3. View approvals
-4. Connect wallet (if revoking)
-5. Select approvals
-6. Click **Revoke Selected**
-
----
-
-## ⚙️ Installation
+# 📦 Installation
 
 Clone the repository:
 
 ```bash
-git clone https://github.com/galxt01/revoky.git
-cd revoky
+git clone https://github.com/YOUR_USERNAME/YOUR_REPO.git
+cd YOUR_REPO
+```
+
+Install dependencies:
+
+```bash
 npm install
+```
+
+---
+
+# 🔑 Environment Setup
+
+Create a `.env` file in the root directory:
+
+```
+VITE_COVALENT_KEY=your_covalent_api_key_here
+```
+
+Important:
+- Must start with `VITE_`
+- Restart dev server after editing `.env`
+
+---
+
+# ▶️ Run Development Server
+
+```bash
 npm run dev
+```
+
+Then open:
+
+```
+http://localhost:5173
+```
+
+---
+
+# 🔗 Covalent API Used
+
+Endpoint:
+
+```
+GET /v1/eth-mainnet/approvals/{walletAddress}/
+```
+
+Documentation:
+https://goldrush.dev/docs/api-reference
+
+---
+
+# ⚠️ Security Notes
+
+- API key is exposed client-side (for development/demo use only).
+- For production deployment, use a backend proxy to protect your API key.
+- Always verify transactions before confirming revokes in MetaMask.
+
+---
+
+# 🔮 Future Improvements
+
+- 🔥 Revoke All High-Risk Button
+- 📊 Dashboard Summary (Total Value at Risk)
+- 🌍 Multi-chain selector (Arbitrum, Base, etc.)
+- ✂ Address truncation + Copy button
+- 🎨 Modern UI styling upgrade
+- 🔐 Backend API proxy for production security
+
+---
+
+# 🧠 Why This Tool Matters
+
+Unlimited token approvals are one of the biggest attack vectors in DeFi.
+
+This tool helps users:
+- See hidden risks
+- Understand exposure
+- Revoke unnecessary permissions
+- Improve wallet security
+
+---
+
+# 📜 License
+
+MIT License
